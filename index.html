@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Winter Activity Sorter</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+    }
+    
+    @keyframes snowfall {
+      0% { transform: translateY(-10px) translateX(0); opacity: 0; }
+      50% { opacity: 1; }
+      100% { transform: translateY(100%) translateX(20px); opacity: 0; }
+    }
+    
+    @keyframes firework {
+      0% { transform: scale(0) rotate(0deg); opacity: 1; }
+      50% { opacity: 1; }
+      100% { transform: scale(2) rotate(180deg); opacity: 0; }
+    }
+    
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-10px) rotate(-5deg); }
+      75% { transform: translateX(10px) rotate(5deg); }
+    }
+    
+    .float-animation {
+      animation: float 3s ease-in-out infinite;
+    }
+    
+    .snowflake {
+      position: absolute;
+      color: white;
+      font-size: 1.5rem;
+      animation: snowfall linear infinite;
+      pointer-events: none;
+    }
+    
+    .dragging {
+      opacity: 0.5;
+      transform: scale(1.05);
+    }
+    
+    .drag-over {
+      border-color: #60a5fa !important;
+      background-color: rgba(96, 165, 250, 0.1) !important;
+      transform: scale(1.02);
+    }
+    
+    .firework {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      animation: firework 0.8s ease-out;
+      pointer-events: none;
+    }
+    
+    .shake-animation {
+      animation: shake 0.5s ease-in-out;
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+ </head>
+ <body class="h-full">
+  <div id="app" class="h-full w-full overflow-auto"></div>
+  <script>
+    const defaultConfig = {
+      background_color: "#1e3a8a",
+      surface_color: "#ffffff",
+      text_color: "#1e293b",
+      primary_action_color: "#3b82f6",
+      secondary_action_color: "#8b5cf6",
+      font_family: "Comic Sans MS",
+      font_size: 16,
+      game_title: "Snowman's Daily Activities",
+      instructions: "Drag each activity to the correct time of day!"
+    };
+
+    let currentRecordCount = 0;
+    
+    const gameData = {
+      easy: {
+        activities: [
+          { id: 1, text: "⏰ Get up", category: "Morning", emoji: "⏰" },
+          { id: 2, text: "🪥 Clean teeth", category: "Morning", emoji: "🪥" },
+          { id: 3, text: "🥞 Have breakfast", category: "Morning", emoji: "🥞" },
+          { id: 4, text: "🏠 Come home", category: "Afternoon", emoji: "🏠" },
+          { id: 5, text: "🍕 Have lunch", category: "Afternoon", emoji: "🍕" },
+          { id: 6, text: "✏️ Do homework", category: "Afternoon", emoji: "✏️" },
+          { id: 7, text: "📺 Watch TV", category: "Evening", emoji: "📺" },
+          { id: 8, text: "😴 Go to bed", category: "Evening", emoji: "😴" }
+        ]
+      },
+      medium: {
+        activities: [
+          { id: 1, text: "⏰ Get up", category: "Morning", emoji: "⏰" },
+          { id: 2, text: "🪥 Clean teeth", category: "Morning", emoji: "🪥" },
+          { id: 3, text: "🧼 Wash my face and hands", category: "Morning", emoji: "🧼" },
+          { id: 4, text: "🥞 Have breakfast", category: "Morning", emoji: "🥞" },
+          { id: 5, text: "🎒 Go to school", category: "Morning", emoji: "🎒" },
+          { id: 6, text: "📚 Have lessons", category: "Afternoon", emoji: "📚" },
+          { id: 7, text: "🏠 Come home", category: "Afternoon", emoji: "🏠" },
+          { id: 8, text: "🍕 Have lunch", category: "Afternoon", emoji: "🍕" },
+          { id: 9, text: "✏️ Do homework", category: "Afternoon", emoji: "✏️" },
+          { id: 10, text: "🎵 Listen to music", category: "Evening", emoji: "🎵" },
+          { id: 11, text: "😴 Have a nap", category: "Evening", emoji: "😴" },
+          { id: 12, text: "📺 Watch TV", category: "Evening", emoji: "📺" },
+          { id: 13, text: "🚿 Take a shower", category: "Evening", emoji: "🚿" },
+          { id: 14, text: "🛋️ Have a rest", category: "Evening", emoji: "🛋️" },
+          { id: 15, text: "🌙 Go to bed", category: "Evening", emoji: "🌙" }
+        ]
+      }
+    };
+
+    let gameState = {
+      difficulty: null,
+      activities: [],
+      categories: ["Morning", "Afternoon", "Evening"],
+      placements: {},
+      score: 0,
+      timer: 0,
+      timerInterval: null,
+      totalActivities: 0
+    };
+
+    // Audio context for sound effects
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playCorrectSound() {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
+      oscillator.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.1); // E5
+      oscillator.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.2); // G5
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.4);
+    }
+
+    function playWrongSound() {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.type = 'sawtooth';
+      oscillator.frequency.setValueAtTime(200, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.3);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    }
+
+    function createSnowflakes() {
+      const existingSnowflakes = document.querySelectorAll('.snowflake');
+      existingSnowflakes.forEach(sf => sf.remove());
+      
+      const container = document.getElementById('app');
+      for (let i = 0; i < 50; i++) {
+        const snowflake = document.createElement('div');
+        snowflake.className = 'snowflake';
+        snowflake.textContent = '❄';
+        snowflake.style.left = Math.random() * 100 + '%';
+        snowflake.style.animationDuration = (Math.random() * 3 + 4) + 's';
+        snowflake.style.animationDelay = Math.random() * 5 + 's';
+        snowflake.style.fontSize = (Math.random() * 1 + 1) + 'rem';
+        snowflake.style.opacity = Math.random() * 0.6 + 0.4;
+        container.appendChild(snowflake);
+      }
+    }
+
+    function showFireworks(x, y) {
+      const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f7b731', '#5f27cd'];
+      for (let i = 0; i < 5; i++) {
+        setTimeout(() => {
+          const firework = document.createElement('div');
+          firework.className = 'firework';
+          firework.style.left = (x - 40) + 'px';
+          firework.style.top = (y - 40) + 'px';
+          firework.style.background = `radial-gradient(circle, ${colors[i % colors.length]} 0%, transparent 70%)`;
+          document.getElementById('app').appendChild(firework);
+          
+          setTimeout(() => firework.remove(), 800);
+        }, i * 100);
+      }
+    }
+
+    function showSadFace(x, y) {
+      const sadFace = document.createElement('div');
+      sadFace.textContent = '😢';
+      sadFace.style.position = 'absolute';
+      sadFace.style.left = (x - 25) + 'px';
+      sadFace.style.top = (y - 25) + 'px';
+      sadFace.style.fontSize = '3rem';
+      sadFace.style.pointerEvents = 'none';
+      sadFace.className = 'shake-animation';
+      document.getElementById('app').appendChild(sadFace);
+      
+      setTimeout(() => sadFace.remove(), 500);
+    }
+
+    function startGame(difficulty) {
+      gameState.difficulty = difficulty;
+      gameState.activities = [...gameData[difficulty].activities].sort(() => Math.random() - 0.5);
+      gameState.placements = {};
+      gameState.score = 0;
+      gameState.timer = 0;
+      gameState.totalActivities = gameState.activities.length;
+      
+      if (gameState.timerInterval) clearInterval(gameState.timerInterval);
+      gameState.timerInterval = setInterval(() => {
+        gameState.timer++;
+        updateTimer();
+      }, 1000);
+      
+      render();
+    }
+
+    function updateTimer() {
+      const timerEl = document.getElementById('timer');
+      if (timerEl) {
+        const minutes = Math.floor(gameState.timer / 60);
+        const seconds = gameState.timer % 60;
+        timerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      }
+    }
+
+    function handleDragStart(e, activity) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify(activity));
+      e.target.classList.add('dragging');
+    }
+
+    function handleDragEnd(e) {
+      e.target.classList.remove('dragging');
+    }
+
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleDragEnter(e) {
+      if (e.target.classList.contains('drop-zone')) {
+        e.target.classList.add('drag-over');
+      }
+    }
+
+    function handleDragLeave(e) {
+      if (e.target.classList.contains('drop-zone')) {
+        e.target.classList.remove('drag-over');
+      }
+    }
+
+    async function handleDrop(e, category) {
+      e.preventDefault();
+      const dropZone = e.currentTarget;
+      dropZone.classList.remove('drag-over');
+      
+      const activity = JSON.parse(e.dataTransfer.getData('text/plain'));
+      const isCorrect = activity.category === category;
+      
+      const rect = dropZone.getBoundingClientRect();
+      const x = e.clientX;
+      const y = e.clientY;
+      
+      if (isCorrect) {
+        playCorrectSound();
+        showFireworks(x, y);
+        gameState.placements[activity.id] = category;
+        gameState.score++;
+        
+        if (gameState.score === gameState.totalActivities) {
+          clearInterval(gameState.timerInterval);
+          setTimeout(() => showCompletionScreen(), 1000);
+        }
+      } else {
+        playWrongSound();
+        showSadFace(x, y);
+      }
+      
+      render();
+    }
+
+    function showCompletionScreen() {
+      const config = window.elementSdk ? window.elementSdk.config : {};
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const secondaryColor = config.secondary_action_color || defaultConfig.secondary_action_color;
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      `;
+      
+      const completionScreen = document.createElement('div');
+      completionScreen.style.cssText = `
+        background-color: ${surfaceColor};
+        padding: 2rem;
+        border-radius: 1rem;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        text-align: center;
+        font-family: ${customFont}, sans-serif;
+        max-width: 400px;
+        width: 90%;
+      `;
+      
+      completionScreen.innerHTML = `
+        <div style="font-size: ${baseSize * 2}px; margin-bottom: 1rem;">🎉</div>
+        <div style="font-size: ${baseSize * 1.5}px; font-weight: bold; color: ${textColor}; margin-bottom: 1rem;">Congratulations!</div>
+        <div style="font-size: ${baseSize}px; color: ${textColor}; margin-bottom: 0.5rem;">You completed the game!</div>
+        <div style="font-size: ${baseSize}px; color: ${textColor}; margin-bottom: 1.5rem;">Time: ${Math.floor(gameState.timer / 60)}:${(gameState.timer % 60).toString().padStart(2, '0')}</div>
+        <input type="text" id="playerName" placeholder="Enter your name" style="width: 100%; padding: 0.5rem; border: 2px solid ${primaryColor}; border-radius: 0.5rem; margin-bottom: 1rem; font-size: ${baseSize}px; box-sizing: border-box;">
+        <div id="messageArea" style="min-height: 1.5rem; margin-bottom: 0.5rem;"></div>
+        <button id="saveScore" style="background-color: ${primaryColor}; color: white; padding: 0.75rem 2rem; border: none; border-radius: 0.5rem; cursor: pointer; font-size: ${baseSize}px; margin-right: 0.5rem;">Save Score</button>
+        <button id="playAgain" style="background-color: ${secondaryColor}; color: white; padding: 0.75rem 2rem; border: none; border-radius: 0.5rem; cursor: pointer; font-size: ${baseSize}px;">Play Again</button>
+      `;
+      
+      overlay.appendChild(completionScreen);
+      document.getElementById('app').appendChild(overlay);
+      
+      document.getElementById('saveScore').onclick = async () => {
+        const playerName = document.getElementById('playerName').value.trim();
+        const messageArea = document.getElementById('messageArea');
+        
+        if (!playerName) {
+          messageArea.innerHTML = `<div style="color: #ef4444; font-size: ${baseSize * 0.85}px;">Please enter your name</div>`;
+          setTimeout(() => messageArea.innerHTML = '', 2000);
+          return;
+        }
+        
+        if (currentRecordCount >= 999) {
+          messageArea.innerHTML = `<div style="color: #ef4444; font-size: ${baseSize * 0.85}px;">Maximum limit of 999 scores reached</div>`;
+          setTimeout(() => messageArea.innerHTML = '', 3000);
+          return;
+        }
+        
+        const saveButton = document.getElementById('saveScore');
+        saveButton.disabled = true;
+        saveButton.style.opacity = '0.5';
+        saveButton.style.cursor = 'not-allowed';
+        
+        const result = await window.dataSdk.create({
+          id: Date.now().toString(),
+          player_name: playerName,
+          difficulty: gameState.difficulty,
+          score: gameState.totalActivities,
+          time_taken: gameState.timer,
+          completed_at: new Date().toISOString()
+        });
+        
+        if (result.isOk) {
+          overlay.remove();
+          gameState.difficulty = null;
+          render();
+        } else {
+          saveButton.disabled = false;
+          saveButton.style.opacity = '1';
+          saveButton.style.cursor = 'pointer';
+          messageArea.innerHTML = `<div style="color: #ef4444; font-size: ${baseSize * 0.85}px;">Failed to save score. Please try again.</div>`;
+        }
+      };
+      
+      document.getElementById('playAgain').onclick = () => {
+        overlay.remove();
+        gameState.difficulty = null;
+        render();
+      };
+    }
+
+    function render() {
+      const config = window.elementSdk ? window.elementSdk.config : {};
+      const app = document.getElementById('app');
+      const backgroundColor = config.background_color || defaultConfig.background_color;
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const primaryColor = config.primary_action_color || defaultConfig.primary_action_color;
+      const secondaryColor = config.secondary_action_color || defaultConfig.secondary_action_color;
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const gameTitle = config.game_title || defaultConfig.game_title;
+      const instructions = config.instructions || defaultConfig.instructions;
+      
+      app.style.background = `url('https://i.imgur.com/xYJIXGn.png')`;
+      app.style.backgroundSize = 'cover';
+      app.style.backgroundPosition = 'center';
+      app.style.backgroundAttachment = 'fixed';
+      app.style.fontFamily = `${customFont}, cursive, sans-serif`;
+      app.style.minHeight = '100%';
+      
+      if (!gameState.difficulty) {
+        app.innerHTML = `
+          <div style="padding: 2rem; max-width: 1200px; margin: 0 auto;">
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <a href="https://vk.com/club221025676" target="_blank" rel="noopener noreferrer" style="display: inline-block; margin-bottom: 1rem;">
+                <img src="https://i.imgur.com/QC0aRsL.jpeg" alt="Logo" style="width: 80px; height: 80px; border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.3); transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+              </a>
+            </div>
+            <div style="text-align: center; margin-bottom: 3rem;">
+              <h1 style="font-size: ${baseSize * 2.5}px; color: white; margin-bottom: 1rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">
+                ⛄ ${gameTitle} ❄️
+              </h1>
+              <p style="font-size: ${baseSize * 1.2}px; color: #e0e7ff;">${instructions}</p>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin-bottom: 3rem;">
+              <div id="easyButton" style="background: #e0f2fe; padding: 2rem; border-radius: 1rem; cursor: pointer; transition: transform 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="font-size: ${baseSize * 1.8}px; margin-bottom: 1rem;">🌟</div>
+                <h2 style="font-size: ${baseSize * 1.5}px; color: ${textColor}; margin-bottom: 0.5rem;">Easy</h2>
+                <p style="font-size: ${baseSize}px; color: ${textColor}; opacity: 0.7;">8 activities to sort</p>
+              </div>
+              
+              <div id="mediumButton" style="background: #e0f2fe; padding: 2rem; border-radius: 1rem; cursor: pointer; transition: transform 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="font-size: ${baseSize * 1.8}px; margin-bottom: 1rem;">⭐</div>
+                <h2 style="font-size: ${baseSize * 1.5}px; color: ${textColor}; margin-bottom: 0.5rem;">Medium</h2>
+                <p style="font-size: ${baseSize}px; color: ${textColor}; opacity: 0.7;">15 activities to sort</p>
+              </div>
+            </div>
+            
+            <div style="background: #e0f2fe; padding: 2rem; border-radius: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+              <h3 style="font-size: ${baseSize * 1.2}px; color: ${textColor}; margin-bottom: 1rem;">🏆 High Scores</h3>
+              <div id="scoresList"></div>
+            </div>
+          </div>
+        `;
+        
+        document.getElementById('easyButton').onclick = () => startGame('easy');
+        document.getElementById('mediumButton').onclick = () => startGame('medium');
+        
+        document.getElementById('easyButton').onmouseover = function() { this.style.transform = 'scale(1.05)'; };
+        document.getElementById('easyButton').onmouseout = function() { this.style.transform = 'scale(1)'; };
+        document.getElementById('mediumButton').onmouseover = function() { this.style.transform = 'scale(1.05)'; };
+        document.getElementById('mediumButton').onmouseout = function() { this.style.transform = 'scale(1)'; };
+        
+        renderScoresList();
+        createSnowflakes();
+      } else {
+        const remainingActivities = gameState.activities.filter(a => !gameState.placements[a.id]);
+        
+        app.innerHTML = `
+          <div style="padding: 1.5rem; max-width: 1400px; margin: 0 auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; background: #e0f2fe; padding: 1rem; border-radius: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); flex-wrap: wrap; gap: 1rem;">
+              <div>
+                <span style="font-size: ${baseSize * 1.2}px; color: ${textColor}; font-weight: bold;">⏱️ Time: <span id="timer">0:00</span></span>
+              </div>
+              <div>
+                <span style="font-size: ${baseSize * 1.2}px; color: ${textColor}; font-weight: bold;">✅ Progress: ${gameState.score}/${gameState.totalActivities}</span>
+              </div>
+              <button id="exitButton" style="background-color: ${secondaryColor}; color: white; padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; cursor: pointer; font-size: ${baseSize}px;">Exit Game</button>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem;">
+              <div style="background: #e0f2fe; padding: 1.5rem; border-radius: 1rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="font-size: ${baseSize * 1.2}px; color: ${textColor}; margin-bottom: 1rem; text-align: center;">📝 Activities</h3>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;" id="activitiesList"></div>
+              </div>
+              
+              <div>
+                <h3 style="font-size: ${baseSize * 1.5}px; color: white; margin-bottom: 1rem; text-align: center; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">Time Buckets</h3>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;" id="categoriesContainer"></div>
+              </div>
+            </div>
+          </div>
+        `;
+        
+        document.getElementById('exitButton').onclick = () => {
+          clearInterval(gameState.timerInterval);
+          gameState.difficulty = null;
+          render();
+        };
+        
+        const activitiesList = document.getElementById('activitiesList');
+        remainingActivities.forEach(activity => {
+          const activityEl = document.createElement('div');
+          activityEl.draggable = true;
+          activityEl.style.cssText = `
+            background: linear-gradient(135deg, ${primaryColor}, ${secondaryColor});
+            color: white;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            cursor: move;
+            transition: transform 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-size: ${baseSize}px;
+          `;
+          activityEl.textContent = activity.text;
+          activityEl.onmouseover = () => activityEl.style.transform = 'scale(1.05)';
+          activityEl.onmouseout = () => activityEl.style.transform = 'scale(1)';
+          activityEl.ondragstart = (e) => handleDragStart(e, activity);
+          activityEl.ondragend = handleDragEnd;
+          activitiesList.appendChild(activityEl);
+        });
+        
+        const categoriesContainer = document.getElementById('categoriesContainer');
+        const categoryEmojis = { "Morning": "🌅", "Afternoon": "☀️", "Evening": "🌙" };
+        
+        gameState.categories.forEach(category => {
+          const categoryEl = document.createElement('div');
+          categoryEl.className = 'drop-zone';
+          categoryEl.style.cssText = `
+            background: #e0f2fe;
+            border: 3px dashed ${primaryColor};
+            border-radius: 1rem;
+            padding: 1.5rem;
+            min-height: 300px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+          `;
+          
+          const placedActivities = gameState.activities.filter(a => gameState.placements[a.id] === category);
+          
+          categoryEl.innerHTML = `
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <div style="font-size: ${baseSize * 2}px; margin-bottom: 0.5rem;">${categoryEmojis[category]}</div>
+              <h4 style="font-size: ${baseSize * 1.2}px; color: ${textColor}; font-weight: bold;">${category}</h4>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              ${placedActivities.map(a => `
+                <div style="background: linear-gradient(135deg, #4ade80, #22c55e); color: white; padding: 0.75rem; border-radius: 0.5rem; font-size: ${baseSize * 0.85}px; text-align: center;">
+                  ${a.emoji}
+                </div>
+              `).join('')}
+            </div>
+          `;
+          
+          categoryEl.ondragover = handleDragOver;
+          categoryEl.ondragenter = handleDragEnter;
+          categoryEl.ondragleave = handleDragLeave;
+          categoryEl.ondrop = (e) => handleDrop(e, category);
+          
+          categoriesContainer.appendChild(categoryEl);
+        });
+        
+        updateTimer();
+        createSnowflakes();
+      }
+    }
+
+    function renderScoresList() {
+      const scoresList = document.getElementById('scoresList');
+      if (!scoresList) return;
+      
+      const config = window.elementSdk ? window.elementSdk.config : {};
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const textColor = config.text_color || defaultConfig.text_color;
+      
+      if (currentRecordCount === 0) {
+        scoresList.innerHTML = `<p style="font-size: ${baseSize}px; color: ${textColor}; opacity: 0.7; text-align: center;">No scores yet. Be the first to play!</p>`;
+        return;
+      }
+    }
+
+    const dataHandler = {
+      onDataChanged(data) {
+        currentRecordCount = data.length;
+        
+        const scoresList = document.getElementById('scoresList');
+        if (!scoresList) return;
+        
+        const config = window.elementSdk ? window.elementSdk.config : {};
+        const baseSize = config.font_size || defaultConfig.font_size;
+        const textColor = config.text_color || defaultConfig.text_color;
+        
+        if (data.length === 0) {
+          scoresList.innerHTML = `<p style="font-size: ${baseSize}px; color: ${textColor}; opacity: 0.7; text-align: center;">No scores yet. Be the first to play!</p>`;
+          return;
+        }
+        
+        const sortedScores = [...data].sort((a, b) => a.time_taken - b.time_taken).slice(0, 10);
+        
+        scoresList.innerHTML = sortedScores.map((score, index) => `
+          <div style="display: flex; justify-content: space-between; padding: 0.75rem; border-bottom: 1px solid rgba(0,0,0,0.1); font-size: ${baseSize}px; color: ${textColor};">
+            <span>${index + 1}. ${score.player_name} (${score.difficulty})</span>
+            <span>${Math.floor(score.time_taken / 60)}:${(score.time_taken % 60).toString().padStart(2, '0')}</span>
+          </div>
+        `).join('');
+      }
+    };
+
+    async function onConfigChange(newConfig) {
+      render();
+    }
+
+    async function init() {
+      const dataInitResult = await window.dataSdk.init(dataHandler);
+      if (!dataInitResult.isOk) {
+        console.error("Failed to initialize data SDK");
+      }
+      
+      if (window.elementSdk) {
+        window.elementSdk.init({
+          defaultConfig,
+          onConfigChange,
+          mapToCapabilities: (config) => ({
+            recolorables: [
+              {
+                get: () => config.background_color || defaultConfig.background_color,
+                set: (value) => {
+                  config.background_color = value;
+                  window.elementSdk.setConfig({ background_color: value });
+                }
+              },
+              {
+                get: () => config.surface_color || defaultConfig.surface_color,
+                set: (value) => {
+                  config.surface_color = value;
+                  window.elementSdk.setConfig({ surface_color: value });
+                }
+              },
+              {
+                get: () => config.text_color || defaultConfig.text_color,
+                set: (value) => {
+                  config.text_color = value;
+                  window.elementSdk.setConfig({ text_color: value });
+                }
+              },
+              {
+                get: () => config.primary_action_color || defaultConfig.primary_action_color,
+                set: (value) => {
+                  config.primary_action_color = value;
+                  window.elementSdk.setConfig({ primary_action_color: value });
+                }
+              },
+              {
+                get: () => config.secondary_action_color || defaultConfig.secondary_action_color,
+                set: (value) => {
+                  config.secondary_action_color = value;
+                  window.elementSdk.setConfig({ secondary_action_color: value });
+                }
+              }
+            ],
+            borderables: [],
+            fontEditable: {
+              get: () => config.font_family || defaultConfig.font_family,
+              set: (value) => {
+                config.font_family = value;
+                window.elementSdk.setConfig({ font_family: value });
+              }
+            },
+            fontSizeable: {
+              get: () => config.font_size || defaultConfig.font_size,
+              set: (value) => {
+                config.font_size = value;
+                window.elementSdk.setConfig({ font_size: value });
+              }
+            }
+          }),
+          mapToEditPanelValues: (config) => new Map([
+            ["game_title", config.game_title || defaultConfig.game_title],
+            ["instructions", config.instructions || defaultConfig.instructions]
+          ])
+        });
+      }
+      
+      render();
+    }
+
+    init();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b2f93c466e5f78c',t:'MTc2NjU3Mzg0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
